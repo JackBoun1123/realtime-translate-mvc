@@ -1,6 +1,8 @@
 import os
 import asyncio
 import json
+import wave
+import io
 from vosk import Model, KaldiRecognizer
 from concurrent.futures import ThreadPoolExecutor
 
@@ -12,24 +14,40 @@ if not os.path.isdir(model_path):
     raise FileNotFoundError(f"Vosk model folder not found: {model_path}")
 
 model = Model(model_path)
-recognizer = KaldiRecognizer(model, 16000)
 executor = ThreadPoolExecutor()
 
 def recognize_sync(audio_bytes: bytes) -> str:
-    # Bỏ qua chunk nhỏ quá (8192 bytes = 4096 samples với 16-bit PCM)
+    # Bỏ qua chunk nhỏ quá
     if len(audio_bytes) < 4000:
+        print("Audio chunk too small, skipping")
         return ""
 
     try:
-        if recognizer.AcceptWaveform(audio_bytes):
-            result = json.loads(recognizer.Result()).get("text", "")
-            recognizer.Reset()
-            return result
+        # Convert raw PCM to WAV format for better compatibility
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(16000)
+            wf.writeframes(audio_bytes)
+        
+        wav_data = wav_buffer.getvalue()
+        
+        # Create a new recognizer for each request to prevent concurrency issues
+        recognizer = KaldiRecognizer(model, 16000)
+        recognizer.SetWords(True)
+        
+        # Process the WAV data
+        if recognizer.AcceptWaveform(wav_data):
+            result = json.loads(recognizer.Result())
+            print(f"Full recognition result: {result}")
+            return result.get("text", "")
         else:
+            partial = json.loads(recognizer.PartialResult())
+            print(f"Partial recognition result: {partial}")
             return ""
     except Exception as e:
-        print("Vosk error, resetting recognizer:", e)
-        recognizer.Reset()
+        print(f"Vosk error: {str(e)}")
         return ""
 
 async def recognize(audio_bytes: bytes) -> str:
