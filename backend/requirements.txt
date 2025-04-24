@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+python-socketio[asyncio_server]==5.7.2
+vosk
+ctranslate2
+transformers
